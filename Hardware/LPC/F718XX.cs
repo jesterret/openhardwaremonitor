@@ -32,6 +32,7 @@ namespace OpenHardwareMonitor.Hardware.LPC {
     private const byte VOLTAGE_BASE_REG = 0x20;
     private const byte TEMPERATURE_CONFIG_REG = 0x69;
     private const byte TEMPERATURE_BASE_REG = 0x70;
+    private const byte FAN_MODE_REG = 0x96;
     private readonly byte[] FAN_TACHOMETER_REG = 
       new byte[] { 0xA0, 0xB0, 0xC0, 0xD0 };
     private readonly byte[] FAN_PWM_REG = 
@@ -52,12 +53,46 @@ namespace OpenHardwareMonitor.Hardware.LPC {
       return null;
     }
 
+    public void SetFanMode(int index, bool manual)
+    {
+      byte[] BitValue = new byte[] { 2, 8, 32 };
+      var mode = ReadByte(FAN_MODE_REG);
+      if (manual)
+        mode |= BitValue[index];
+      else
+      {
+        byte val = (byte)~BitValue[index];
+        mode &= val;
+      }
+      WriteByte(FAN_MODE_REG, mode);
+    }
+
+    public void SetTempControl(int index) {
+       var reg = FAN_PWM_REG[index];
+       SetFanMode(index, false);
+       WriteByte((byte)(reg + 0xC), 29); // Function
+       WriteByte((byte)(reg + 0x3), 70); // Degrees High
+       WriteByte((byte)(reg + 0x4), 40); // Degrees 3
+       WriteByte((byte)(reg + 0x5), 30); // Degrees 2
+       WriteByte((byte)(reg + 0x6), 25); // Degrees Low
+       WriteByte((byte)(reg + 0x7), 255); // Degrees High percentage
+       WriteByte((byte)(reg + 0x8), 192); // (Degrees High + Degrees 3) / 2 point
+       WriteByte((byte)(reg + 0x9), 128); // Degrees 3 percentage
+       WriteByte((byte)(reg + 0xA), 32); // Degrees 2 percentage
+       WriteByte((byte)(reg + 0xB), 0); // Degrees Low percentage
+    }
     public void WriteGPIO(int index, byte value) { }
 
     public void SetControl(int index, byte? value) {
-      if(index < controls.Length)
-        WriteByte(FAN_PWM_REG[index], value ?? 128);
-    }   
+      if (index < controls.Length) {
+         if (value.HasValue) {
+            SetFanMode(index, true);
+            WriteByte(FAN_PWM_REG[index], value.Value);
+         }
+         else
+            SetTempControl(index);
+      }
+    }
 
     public F718XX(Chip chip, ushort address) {
       this.address = address;
@@ -168,7 +203,7 @@ namespace OpenHardwareMonitor.Hardware.LPC {
           fans[i] = null;        
       }
       for (int i = 0; i < controls.Length; i++) {
-        controls[i] = (100*ReadByte((byte)(PWM_VALUES_OFFSET + i)))/256.0f;
+        controls[i] = (100*ReadByte((byte)(PWM_VALUES_OFFSET + i)))/255.0f;
       }
 
       Ring0.ReleaseIsaBusMutex();
